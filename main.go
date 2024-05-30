@@ -10,8 +10,8 @@ import (
 	"syscall"
 	"time"
 
-	ServerTime "middleware/ServerTime"
 
+	
 	"github.com/gin-gonic/gin"
 	_ "github.com/lib/pq"
 	"github.com/prometheus/client_golang/prometheus"
@@ -19,6 +19,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
 	"github.com/sirupsen/logrus"
+	"github.com/joho/godotenv"
+	d "disbursement/init"
 )
 
 func recordMetrics() {
@@ -49,8 +51,19 @@ func main() {
 
 	var ctx = context.Background()
 
-	sTime := ServerTime.Init()
+	err := godotenv.Load()
+	if err != nil {
+		logrus.Fatalf("Error loading .env file: %s\n", err)
+	}
+  
+	isUsingDatadog := os.Getenv("IS_USING_DATADOG")
+  
+	if (isUsingDatadog!="FALSE") {
+		logrus.Info("is using datadog")
+	}
 
+	d.CreateAndOpen("user")
+	
 	rdb := redis.NewClient(&redis.Options{
 		Addr:     "localhost:6379",
 		Password: "", // no password set
@@ -66,12 +79,18 @@ func main() {
 	connStr := "user=myuser dbname=mydb password=mypassword sslmode=disable"
 	db, err := sql.Open("postgres", connStr)
 	if err != nil {
+		logrus.Fatalf("listen db: %s\n", err)
 		panic(err)
 	}
 	defer db.Close()
 
 	// r.SetTrustedProxies([]string{"127.0.0.1", "0.0.0.0/8080"})
-
+	api := r.Group("/v1")
+    {
+		api.GET("/users", func(c *gin.Context) {
+            c.String(http.StatusOK, "API endpoint")
+        })
+	}
 	r.GET("/getData", func(c *gin.Context) {
 		c.String(http.StatusOK, "Hello world!")
 	})
@@ -80,11 +99,14 @@ func main() {
 		c.String(200, "pong")
 	})
 
+	
+	r.GET("/healthcheck", HealthCheck)
+
+
 	// handling metrics by prometheus
 	recordMetrics()
 	r.GET("/metrics", prometheusHandler())
 
-	sTime.Uptime()
 
 	// Listen and Server in 0.0.0.0:8080
 	logrus.WithField("addr", ":8080").Info("starting server")
@@ -130,4 +152,10 @@ func CORSMiddleware() gin.HandlerFunc {
 
 		c.Next()
 	}
+}
+
+func HealthCheck(context *gin.Context) {
+	context.JSON(http.StatusOK, gin.H{
+		"message": "API is up and working fine",
+	})
 }
